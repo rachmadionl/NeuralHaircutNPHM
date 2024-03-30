@@ -1,3 +1,4 @@
+import argparse
 import trimesh
 import numpy as np
 import pickle

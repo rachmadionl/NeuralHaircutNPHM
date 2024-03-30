@@ -1,24 +1,24 @@
 sdf_chamfer: {
-      "mesh_outer_hair": "./implicit-hair-data/data/DATASET_TYPE/CASE_NAME/hair_outer.ply",
-      "mesh_outer_hair_remeshed": "./implicit-hair-data/data/DATASET_TYPE/CASE_NAME/hair_outer_remeshed.ply",
+      "mesh_outer_hair": "./implicit-hair-data/data/monocular/person_0/hair_outer.ply",
+      "mesh_outer_hair_remeshed": "./implicit-hair-data/data/monocular/person_0/hair_outer_remeshed.ply",
       "num_points": 10000,
       }
       
 textured_strands: {
-      "path_to_mesh": "./implicit-hair-data/data/DATASET_TYPE/CASE_NAME/head_prior.obj",
+      "path_to_mesh": "./implicit-hair-data/data/monocular/person_0/head_prior.obj",
       "decoder_checkpoint_path": "./pretrained_models/strand_prior/strand_ckpt.pth",
       "num_strands": 1900,
       "max_num_strands": 100000,
       "texture_size": 256,
       "geometry_descriptor_size": 64,
       "appearance_descriptor_size": 16,
-      "cut_scalp": "./implicit-hair-data/data/DATASET_TYPE/CASE_NAME/cut_scalp_verts.pickle"
+      "cut_scalp": "./implicit-hair-data/data/monocular/person_0/cut_scalp_verts.pickle"
   }
 
 diffusion_prior: {
       "use_diffusion": true,
       "start_denoise": 1,
-      "diffuse_mask": "./implicit-hair-data/data/DATASET_TYPE/CASE_NAME/dif_mask.png",
+      "diffuse_mask": "./implicit-hair-data/data/monocular/person_0/dif_mask.png",
       "diffuse_bs": 32,
       "dif_path": "./pretrained_models/diffusion_prior/dif_ckpt.pth",  
        model: {
@@ -51,10 +51,10 @@ diffusion_prior: {
   }
   
 render: {
-    "use_render": true,
+    "use_render": False,
     "image_size": 512,
     "feat_size": 16,
-    "mesh_path": "./implicit-hair-data/data/DATASET_TYPE/CASE_NAME/head_prior.obj",
+    "mesh_path": "./implicit-hair-data/data/monocular/person_0/head_prior.obj",
     "num_strands": 1900,
     "strands_len": 99,
     "logging_freq": 500,

@@ -94,7 +94,7 @@ class OptimizableCameras(nn.Module):
         if len(intrinsics_0.shape) < 3:
             intrinsics_0 = intrinsics_0[None]
             pose_0 = pose_0[None]
-            cam_index = cam_index[0].unsqueeze(-1)
+            # cam_index = cam_index[0].unsqueeze(-1)
         # print(cam_index)
 
         bs = intrinsics_0.shape[0]

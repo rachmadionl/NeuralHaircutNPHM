@@ -24,6 +24,8 @@ class StrandsTrainer:
             print('Create rasterizer!')
             self.strands_render = Renderer(config['render'], save_dir=save_dir).to(self.device)
             params_to_train += list(self.strands_render.parameters())
+        else:
+            print(f'No Rendering Used!')
 
         self.starting_rendering_iter = config['general']['starting_rendering_iter']  
 

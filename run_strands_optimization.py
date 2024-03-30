@@ -18,6 +18,7 @@ import torch
 import torch.nn.functional as F
 import trimesh
 from src.models.dataset import Dataset, MonocularDataset
+from src.models.dataset_torch import H3DSDatasetTorch, MonocularDatasetTorch
 from pyhocon import ConfigFactory
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -72,9 +73,9 @@ class Runner:
         os.makedirs(os.path.join(self.base_exp_dir, 'hair_primitives'), exist_ok=True)
         
         if scene_type == 'h3ds':
-            self.dataset = Dataset(self.conf['dataset'])
+            self.dataset = H3DSDatasetTorch(self.batch_size, self.conf['dataset'])
         else:
-            self.dataset = MonocularDataset(self.conf['dataset'])
+            self.dataset = MonocularDatasetTorch(self.batch_size, self.conf['dataset'])
         
         self.iter_step = 0
 
@@ -110,29 +111,38 @@ class Runner:
         bound_min = torch.tensor(self.dataset.object_bbox_min, dtype=torch.float32)
         bound_max = torch.tensor(self.dataset.object_bbox_max, dtype=torch.float32)
         
-        for iter_i in tqdm(range(res_step)):            
+        for _ in tqdm(range(res_step)):            
             cur_img = image_perm[self.iter_step % len(image_perm)]
-            _, cam_intr, cam_pose = self.dataset.gen_random_rays_at(cur_img, self.batch_size)
-            cam_extr = torch.linalg.inv(cam_pose.detach())
+            # _, cam_intr, cam_pose = self.dataset.gen_random_rays_at(cur_img, self.batch_size)
+            return_dict = self.dataset[cur_img]
+            cam_extr = torch.linalg.inv(return_dict['pose'].detach())
 
-            orig_data_size = self.dataset.images[cur_img].shape[1] # H shape, suppose square images
+            orig_data_size = return_dict['H'] # H shape, suppose square images
             
             raster_dict = {}
             raster_dict['iter'] = self.iter_step
             raster_dict['cam_extr'] = cam_extr
             
             if orig_data_size is None:
-                raster_dict['cam_intr'] = cam_intr
-                raster_dict['gt_silh'] = self.dataset.hair_masks[cur_img].permute(2, 0, 1).cuda()
-                raster_dict['gt_rgb'] = self.dataset.images[cur_img].permute(2, 0, 1).cuda()
+                # raster_dict['cam_intr'] = cam_intr
+                # raster_dict['gt_silh'] = self.dataset.hair_masks[cur_img].permute(2, 0, 1).cuda()
+                # raster_dict['gt_rgb'] = self.dataset.images[cur_img].permute(2, 0, 1).cuda()
+                raster_dict['cam_intr'] = return_dict['intrinsic']
+                raster_dict['gt_silh'] = return_dict['hair_mask']
+                raster_dict['gt_rgb'] = return_dict['image']
             else:
                 # need to change cameras intrinsic as we render in resolution 512x512
                 scale_factor = orig_data_size / self.img_size
-                raster_dict['cam_intr'] = scale_mat(deepcopy(cam_intr), scale_factor)
-                raster_dict['gt_silh'] = F.interpolate(self.dataset.hair_masks[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
-                raster_dict['gt_rgb'] = F.interpolate(self.dataset.images[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
+                # raster_dict['cam_intr'] = scale_mat(deepcopy(cam_intr), scale_factor)
+                # raster_dict['gt_silh'] = F.interpolate(self.dataset.hair_masks[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
+                # raster_dict['gt_rgb'] = F.interpolate(self.dataset.images[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
+                raster_dict['cam_intr'] = scale_mat(deepcopy(return_dict['intrinsic']), scale_factor)
+                raster_dict['gt_silh'] = F.interpolate(return_dict['hair_mask'][None], size=self.img_size, mode='bilinear')[0].cuda()
+                raster_dict['gt_rgb'] = F.interpolate(return_dict['image'][None], size=self.img_size, mode='bilinear')[0].cuda()
 
-            raster_dict['visual_gt_orients'] = self.dataset.orient_at(cur_img, resolution_level=1)
+
+            # raster_dict['visual_gt_orients'] = self.dataset.orient_at(cur_img, resolution_level=1)
+            raster_dict['visual_gt_orients'] = return_dict['orient_image']
             
             losses.update({
                 'hair_' + str(key): val for key, val in self.hair_primitives_trainer.train_step(model=self.hair_network, it=self.iter_step, raster_dict=raster_dict).items()

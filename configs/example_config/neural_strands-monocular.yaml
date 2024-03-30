@@ -1,5 +1,5 @@
 general: {
-    "base_exp_dir": "./exp/CASE_NAME/soft-blending_hair-sdf",
+    "base_exp_dir": "./exp/person_0/soft-blending_hair-sdf",
     "recording": [
         "./",
         "./src/models"
@@ -7,22 +7,22 @@ general: {
 }
 
 dataset: {
-    "data_dir":  "./implicit-hair-data/data/monocular/CASE_NAME",
+    "data_dir":  "./implicit-hair-data/data/monocular/person_0",
     "render_cameras_name":  "cameras.npz",
     "object_cameras_name":  "cameras.npz",
     "orient_num_bins":  180,
     "mask_based_ray_sampling":  false,
     "mask_binarization_threshold":  0.5,
-    "path_to_mesh_prior":  "./implicit-hair-data/data/monocular/CASE_NAME/head_prior_wo_eyes.obj",
-    "path_to_scale": "./implicit-hair-data/data/monocular/CASE_NAME/scale.pickle",
+    "path_to_mesh_prior":  "./implicit-hair-data/data/monocular/person_0/head_prior_wo_eyes.obj",
+    "path_to_scale": "./implicit-hair-data/data/monocular/person_0/scale.pickle",
     "views_idx":  '', 
-    "fitted_camera_path": "./implicit-hair-data/data/monocular/CASE_NAME/fitted_cameras.pth",
+    "fitted_camera_path": "./implicit-hair-data/data/monocular/person_0/fitted_cameras.pth",
 }
 
 train: {
     "learning_rate": 0.0005,
     "learning_rate_alpha": 0.05,
-    "end_iter": 300000,
+    "end_iter": 60000,
     "n_images_sampling": 32,
     "bs_sampling": 32,
 
@@ -32,7 +32,6 @@ train: {
     "tune_cameras_start": -1,
     "tune_cameras_end": -1,   
 
-    "batch_size": 1024,
     "val_render_resolution_level": 2,
     "val_mesh_resolution": 256,
     "val_orients_resolution": 128,
@@ -59,7 +58,7 @@ train: {
     "head_prior_normal_weight": 0.01,
     "head_prior_sdf_weight": 0.1,
      
-    "pretrain_path": "./implicit-hair-data/data/monocular/CASE_NAME/ckpt_final.pth",
+    "pretrain_path": "./implicit-hair-data/data/monocular/person_0/ckpt_final.pth",
     "pretrain_strands_path": "",
 }
 

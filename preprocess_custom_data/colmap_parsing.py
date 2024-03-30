@@ -11,10 +11,15 @@ from scipy.spatial.transform import Rotation as R
     
 def main(args):
     
-    images_file = f'{args.path_to_scene}/sparse_txt/images.txt'
-    points_file = f'{args.path_to_scene}/sparse_txt/points3D.txt'
-    camera_file = f'{args.path_to_scene}/sparse_txt/cameras.txt'
-    
+    if args.scene_type == 'h3ds':
+        images_file = f'{args.path_to_scene}/colmap/sparse_txt/images.txt'
+        points_file = f'{args.path_to_scene}/colmap/sparse_txt/points3D.txt'
+        camera_file = f'{args.path_to_scene}/colmap/sparse_txt/cameras.txt'
+    elif args.scene_type == 'monocular':
+        images_file = f'{args.path_to_scene}/sparse_txt/images.txt'
+        points_file = f'{args.path_to_scene}/sparse_txt/points3D.txt'
+        camera_file = f'{args.path_to_scene}/sparse_txt/cameras.txt'
+
     # Parse colmap cameras and used images
     with open(camera_file) as f:
         lines = f.readlines()
@@ -74,8 +79,11 @@ def main(args):
     colors = np.stack(colors)
     
     output_folder = args.save_path
-    images_folder = os.path.join(args.path_to_scene, 'video_frames')
-    
+    if args.scene_type == 'monocular':
+        images_folder = os.path.join(args.path_to_scene, 'video_frames')
+    elif args.scene_type == 'h3ds':
+        images_folder = os.path.join(args.path_to_scene, 'image')
+
     os.makedirs(output_folder, exist_ok=True)
     os.makedirs(os.path.join(output_folder, 'full_res_image'), exist_ok=True)
     
@@ -95,6 +103,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(conflict_handler='resolve')
 
+    parser.add_argument('--scene_type', default='monocular', type=str)
     parser.add_argument('--path_to_scene', default='./implicit-hair-data/data/monocular/person_1', type=str)
     parser.add_argument('--save_path', default='./implicit-hair-data/data/monocular/person_1/colmap', type=str)
 
