@@ -130,7 +130,7 @@ dmypy.json
 .pyre/
 
 # Ignore things in this project
-data*
+implicit-hair-data
 exps*
 pretrained_models*
 *__pycache__*
