@@ -1,12 +1,19 @@
+import argparse
+import copy
+import os
+import pickle as pk
+
 from einops import repeat
+import matplotlib.pyplot as plt
 import numpy as np
+import open3d as o3d
 import torch
 import trimesh
 from torch import nn
 import torch.nn.functional as F
 
-from pytorch3d.io import IO, load_obj, load_ply
-from pytorch3d.structures import Pointclouds
+from pytorch3d.io import IO, load_obj, load_ply, save_obj
+from pytorch3d.structures import Meshes, Pointclouds
 from pytorch3d.loss.chamfer import _handle_pointcloud_input
 from pytorch3d.ops.knn import knn_gather, knn_points
  
@@ -170,59 +177,299 @@ def pruned_chamfer_loss(x, y,
     return cham_x, cham_y, cham_norm_x, cham_norm_y
 
 
-def main():
+def dilate_vertex_mask(edges, mask):
+    # edges: (M, 2) torch tensor long
+    # mask: (N,) torch tensor bool (1 = keep; 0 = omit)
+
+    mask_dilated = mask.clone().bool()
+    edges_crossing = mask_dilated[edges[:, 0]] != mask_dilated[edges[:, 1]]
+    mask_dilated[edges[edges_crossing, 0]] = True
+    mask_dilated[edges[edges_crossing, 1]] = True
+    return mask_dilated
+
+
+def inv(binary_mask: np.ndarray) -> np.ndarray:
+    return ~binary_mask
+
+
+def get_border_edges_and_extract_the_vertice(mesh):
+    single_triangle_edges = []
+    edge_triangle_count = {}
+
+    for face in np.asarray(mesh.triangles):
+        for i in range(len(face)):
+            edge = (face[i], face[(i + 1) % len(face)]) if face[i] < face[(i + 1) % len(face)] else (face[(i + 1) % len(face)], face[i])
+            edge_triangle_count[edge] = edge_triangle_count.get(edge, 0) + 1
+
+    for edge, count in edge_triangle_count.items():
+        if count == 1:
+            single_triangle_edges.append(edge)
+    
+    single_triangle_edges = np.array(single_triangle_edges)
+    verts_idx = np.unique(np.concatenate([single_triangle_edges[:, i] for i in range(len(single_triangle_edges[0]))]))
+    # breakpoint()
+    return verts_idx
+
+
+def remove_vertices_and_corresponding_faces(ver, faces, mask):
+    # ver: (N, 3) torch tensor float32
+    # faces: (N, 3) torch tensor long
+    # mask: (N,) torch tensor bool (1 = keep; 0 = omit)
+
+    ver_to_keep = torch.arange(ver.shape[0]).to(ver.device)[mask]
+    ver_new = ver[ver_to_keep]
+    new2old = torch.arange(ver.shape[0]).to(ver.device)[mask]
+    old2new = torch.full((ver.shape[0],), -1, dtype=torch.long).to(ver.device)
+    old2new[new2old] = torch.arange(new2old.shape[0]).to(ver.device)
+    faces_new = faces[torch.all(mask[faces], dim=1)]
+    faces_new = old2new[faces_new]
+    return ver_new, faces_new
+
+# List of Segmentation Mesh Color:
+# array([
+#    [ 22,  90, 101, 255], -> Right Ear
+#    [ 22, 143, 184, 255], -> Lips 
+#    [ 58,  97,   6, 255],
+#    [ 73,  62, 222, 255], -> Nose
+#    [ 79, 105,  62, 255], -> Right Eyebrow
+#    [100,   0,   1, 255], -> Left Eye
+#    [104, 199,   8, 255], -> Lower lip
+#    [109,  26, 150, 255], -> Left Eyebrow
+#    [109, 149, 195, 255], -> Upper lip
+#    [120, 193, 124, 255], -> Hair
+#    [135,  86,  78, 255],
+#    [138,  31,  70, 255],
+#    [164,  39,  79, 255], -> Neck
+#    [177,   5, 249, 255], -> Enclosure
+#    [181, 127,  49, 255], -> Left Ear
+#    [201, 212, 140, 255], -> Left Eye
+#    [211,  67,  14, 255], -> Face
+#    [249, 209,  44, 255]  -> Shirt
+#    ], dtype=uint8)
+
+
+def main(args, number):
     # Load meshes
+    print(f'Extracting hair on subject number {number} ...')
     neck_color = [164,  39,  79, 255]
     hair_color = [120, 193, 124, 255]
     shirt_color = [249, 209,  44, 255]
-    threshold_min = 0.0005
+    face_color = [211, 67, 14, 255]
+    ear_left_color = [181, 127,  49, 255]
+    ear_right_color = [22,  90, 101, 255]
 
-    number = 70
+    threshold_min = 0.0005
+    threshold_ear_min = 0.0005
+
     filename_regs = f'/home/rachmadio/dev/data/NPHM/scan/0{number}/000/registration.ply'
     filename_scan = f'/home/rachmadio/dev/data/NPHM/scan/0{number}/000/scan.obj'
     filename_segm = f'/home/rachmadio/dev/data/NPHM/segmented_meshes/0{number}_exp_000.obj'
+    filename_flame = f'/home/rachmadio/dev/data/NPHM/scan/0{number}/000/flame.ply'
 
     verts_regs, faces_regs = load_ply(filename_regs)
-    verts_scan, faces_scan, _ = load_obj(filename_scan)
+    verts_scan, faces_scan, aux_scan = load_obj(filename_scan)
+    verts_flame, faces_flame = load_ply(filename_flame)
+    aux_scan_normals = aux_scan.normals
     mesh_segm = trimesh.load(filename_segm)
 
+    mesh_scan = Meshes(verts=[verts_scan], faces=[faces_scan.verts_idx])
     # verts_regs = mesh_regs.vertices.view(np.ndarray)
     # verts_scan = mesh_scan.vertices.view(np.ndarray)
     label_segm = mesh_segm.visual.vertex_colors.view(np.ndarray)
 
     verts_scan = verts_scan.to('cuda:0')
     verts_regs = verts_regs.to('cuda:0')
-    cham_scan, cham_regs, cham_norm_scan, cham_norm_regs = pruned_chamfer_loss(verts_scan, verts_regs)
+    verts_flame =verts_flame.to('cuda:0')
+    cham_scan, _, _, _ = pruned_chamfer_loss(verts_scan, verts_regs)
 
     verts_scan = verts_scan.cpu()
     cham_scan = cham_scan.cpu()
 
-    filter_neck_idx = (label_segm == neck_color).all(axis=1) == 1
-    filter_shirt_idx = (label_segm == shirt_color).all(axis=1) == 1
-    filter_out_neck_and_shirt_idx = ~np.logical_or(filter_neck_idx, filter_shirt_idx)
+    neck_idx = (label_segm == neck_color).all(axis=1) == 1
+    shirt_idx = (label_segm == shirt_color).all(axis=1) == 1
+    face_idx = (label_segm == face_color).all(axis=1) == 1
+    no_face_neck_shirt_idx = ~(np.logical_or(np.logical_or(neck_idx, shirt_idx), face_idx))
 
-    label_wo_neck_and_shirt = label_segm[filter_out_neck_and_shirt_idx]
-    filter_hair_idx = np.where((label_wo_neck_and_shirt == hair_color).all(axis=1) == 1)[0]
+    label_no_neck_and_shirt = label_segm[no_face_neck_shirt_idx]
+    filter_hair_idx = np.where((label_no_neck_and_shirt == hair_color).all(axis=1) == 1)[0]
 
-    # breakpoint()
+    # Ears with segmented Mesh
+    if not args.use_flame:
+        ear_left_idx = (label_segm == ear_left_color).all(axis=1) == 1
+        ear_right_idx = (label_segm == ear_right_color).all(axis=1) == 1
+        ears_idx = np.logical_or(ear_left_idx, ear_right_idx)
+
+        ears_shrunked_idx =  inv(dilate_vertex_mask(mesh_scan.edges_packed(), torch.from_numpy(inv(ears_idx))).numpy())
+        ears_shrunked_filtered_idx = ears_shrunked_idx[no_face_neck_shirt_idx]
+
+    else:
+        # Ears with FLAME Region
+        with open('flame_masks.pkl', 'rb') as fin:
+            flame_region_masks = pk.load(fin)
+        
+        ear_left_flame_idx = flame_region_masks['left_ear']
+        ear_right_flame_idx = flame_region_masks['right_ear']
+        ears_flame_idx = np.concatenate([ear_left_flame_idx, ear_right_flame_idx])
+    # ears_flame_mask = torch.zeros(verts_flame.size(0)).to(verts_flame.device)
+    # ears_flame_mask[ears_flame_idx] = 1
+
+
     # filter_chamfer_too_far = threshold_max > cham_scan[filter_out_neck_and_shirt_idx]
-    filter_chamfer_too_close = cham_scan[filter_out_neck_and_shirt_idx] > threshold_min
+    filter_chamfer_too_close = cham_scan[no_face_neck_shirt_idx] > threshold_min
     filter_chamfer_idx = filter_chamfer_too_close #  filter_chamfer_too_far.logical_and_(filter_chamfer_too_close)
 
-    verts_scan = verts_scan[filter_out_neck_and_shirt_idx]
+
+    verts_scan = verts_scan[no_face_neck_shirt_idx]
+    aux_scan_normals = aux_scan_normals[no_face_neck_shirt_idx]
+
     verts_scan_chamfer = verts_scan[filter_chamfer_idx]
+    aux_scan_normals_chamfer = aux_scan_normals[filter_chamfer_idx]
     # verts_scan_chamfer = verts_scan_wo_neck_and_shirt[filter_chamfer_idx]
     verts_scan_hair = verts_scan[filter_hair_idx]
-    verts_scan_union = torch.unique(torch.cat([verts_scan_chamfer, verts_scan_hair]), dim=0)
 
-    pcl = Pointclouds(points=verts_scan_union.unsqueeze(0))
-    IO().save_pointcloud(pcl, f"./results_lower_threshold_remove_max/output_pointcloud_{number}_low_thresh_new.ply")
+    filter_chamfer_idx_value = filter_chamfer_idx.numpy().nonzero()[0]
+    filter_hair_idx_value = filter_hair_idx.nonzero()[0]
+    aux_scan_normals_hair = aux_scan_normals[filter_hair_idx]
 
-    # pcl_color = Pointclouds(points=verts_scan_np[filter_color_idx].unsqueeze(0))
-    # IO().save_pointcloud(pcl_color, "segmented_pointcloud.ply")
+    verts_scan_cat = torch.cat([verts_scan_chamfer, verts_scan_hair])
+    aux_scan_normals_cat = np.concatenate([aux_scan_normals_chamfer, aux_scan_normals_hair])
+    # verts_scan_union = torch.unique(torch.cat([verts_scan_chamfer, verts_scan_hair]), dim=0)
+    # verts_scan_union_idx = np.unique(np.concatenate([filter_chamfer_idx_value, filter_hair_idx_value]), axis=0)
+    verts_scan_union_np, idx = np.unique(verts_scan_cat.numpy(), axis=0, return_index=True)
+    
+    verts_scan_union = verts_scan_cat[idx]
+    aux_normals_union = aux_scan_normals_cat[idx]
 
     
+    if not args.use_flame:  # Chamfer Ears with Segmented Mesh
+        print('Use Mesh Ear Segmentaton')
+        cham_scan_union, _, _, _ = pruned_chamfer_loss(verts_scan_union, verts_scan[ears_shrunked_filtered_idx])
+    else:  # Chamfer Ears with FLAME
+        print('Use FLAME for Ear Segmentaton')
+        cham_scan_union, _, _, _ = pruned_chamfer_loss(verts_scan_union.to('cuda'), verts_flame[ears_flame_idx])
+        cham_scan_union = cham_scan_union.to('cpu')
+        verts_scan_union = verts_scan_union.to('cpu')
 
+    filter_ear_chamfer = cham_scan_union > threshold_ear_min
+    verts_scan_final = verts_scan_union[filter_ear_chamfer]
+    aux_normals_final = aux_normals_union[filter_ear_chamfer]
+
+    filter_y = verts_scan_final[:, 1] > (verts_scan_final[:, 1].median() - 0.55)
+    verts_scan_final = verts_scan_final[filter_y]
+    aux_normals_final = aux_normals_final[filter_y]
+    
+    pcl = Pointclouds(points=verts_scan_final.unsqueeze(0))
+    save_filename = f"./{args.out_folder}/{number}_pcd.ply"
+
+    IO().save_pointcloud(pcl, save_filename)
+    print(f'Done! Saving the results to {save_filename}\n')
+
+    pcd = o3d.geometry.PointCloud()
+
+    pcd.points = o3d.utility.Vector3dVector(verts_scan_final)
+    pcd.normals = o3d.utility.Vector3dVector(aux_normals_final)
+    # breakpoint()
+    # pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=1e-6, max_nn=30))
+    # pcd.estimate_normals()
+    # pcd.orient_normals_consistent_tangent_plane(100)
+    # o3d.visualization.draw_geometries([pcd])
+
+    # cl, ind = pcd.remove_radius_outlier(nb_points=16, radius=0.07)
+    # cl, ind = pcd.remove_statistical_outlier(nb_neighbors=50, std_ratio=2.5)
+    # o3d.visualization.draw_geometries([cl])
+
+    mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=8)
+    mesh.compute_vertex_normals()
+    mesh.paint_uniform_color([0.639, 0.639, 0.592])
+    # print('Displaying reconstructed mesh ...')
+    # o3d.visualization.draw([mesh])
+
+    print('visualize densities')
+    densities = np.asarray(densities)
+    density_colors = plt.get_cmap('plasma')(
+        (densities - densities.min()) / (densities.max() - densities.min()))
+    density_colors = density_colors[:, :3]
+    density_mesh = o3d.geometry.TriangleMesh()
+    density_mesh.vertices = mesh.vertices
+    density_mesh.triangles = mesh.triangles
+    density_mesh.triangle_normals = mesh.triangle_normals
+    density_mesh.vertex_colors = o3d.utility.Vector3dVector(density_colors)
+    # o3d.visualization.draw_geometries([density_mesh])
+
+    print('remove low density vertices')
+    verts = np.asarray(mesh.vertices)
+    vertices_low_density_mask = densities < np.quantile(densities, 0.01)
+    vertices_low_density = verts[vertices_low_density_mask]
+
+    # breakpoint()
+    if (np.max(vertices_low_density[:, 1]) - np.max(verts)) <= 0.2: # Low Density Area at Top, do not filter them out.
+        vertices_low_y_mask = verts[:, 1] < (np.max(vertices_low_density[:, 1]) - 0.1)
+        vertices_to_remove = np.multiply(vertices_low_density_mask, vertices_low_y_mask)
+    else:
+        vertices_to_remove = vertices_low_density_mask
+
+    pcd_low_density = o3d.geometry.PointCloud()
+    pcd_low_density.points = o3d.utility.Vector3dVector(verts[vertices_to_remove])
+    pcd_low_density.paint_uniform_color([1, 0.706, 0])
+    # o3d.visualization.draw([mesh, pcd_low_density])
+    mesh.remove_vertices_by_mask(vertices_to_remove)
+
+    print("Cluster connected triangles")
+    with o3d.utility.VerbosityContextManager(
+            o3d.utility.VerbosityLevel.Debug) as cm:
+        triangle_clusters, cluster_n_triangles, cluster_area = (
+            mesh.cluster_connected_triangles())
+    triangle_clusters = np.asarray(triangle_clusters)
+    cluster_n_triangles = np.asarray(cluster_n_triangles)
+    cluster_area = np.asarray(cluster_area)
+
+    # print("Show mesh with small clusters removed")
+    # triangles_to_remove = cluster_n_triangles[triangle_clusters] < 100
+    # mesh.remove_triangles_by_mask(triangles_to_remove)
+
+    print("Show largest cluster")
+    largest_cluster_idx = cluster_n_triangles.argmax()
+    triangles_to_remove = triangle_clusters != largest_cluster_idx
+    mesh.remove_triangles_by_mask(triangles_to_remove)
+    # o3d.visualization.draw_geometries([mesh])
+
+    verts_border_idx = get_border_edges_and_extract_the_vertice(mesh)
+    pcd_border = o3d.geometry.PointCloud()
+    pcd_border.points = o3d.utility.Vector3dVector(np.asarray(mesh.vertices)[verts_border_idx])
+    pcd_border.paint_uniform_color([1, 0.706, 0])
+    # o3d.visualization.draw([mesh, pcd_border])
+
+    verts = torch.from_numpy(np.asarray(mesh.vertices))
+    faces = torch.from_numpy(np.asarray(mesh.triangles))
+    mesh_torch = Meshes(verts=[verts], faces=[faces])
+    verts_border_mask = torch.zeros(verts.size(0))
+    verts_border_mask[verts_border_idx] = 1
+    for _ in range(3):
+        verts_border_mask = dilate_vertex_mask(mesh_torch.edges_packed(), verts_border_mask)
+
+    verts_final, faces_final = remove_vertices_and_corresponding_faces(verts, faces.long(), ~verts_border_mask)
+    mesh_filename = f"./{args.out_folder}/{number}_mesh.obj"
+    save_obj(mesh_filename, verts_final, faces_final)
+
+    torch.cuda.empty_cache()
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--nphm_folder', type=str, default='/home/rachmadio/dev/data/NPHM/scan')
+    parser.add_argument('--out_folder', type=str, default='results')
+    parser.add_argument('--use_flame', type=bool, default=False)
+    parser.add_argument('--number', type=int, default=None)
+    args = parser.parse_args()
+
+    if not os.path.exists(args.out_folder):
+        os.mkdir(args.out_folder)
+
+    if not args.number:
+        nphm_folder = args.nphm_folder
+
+        folders = sorted(os.listdir(nphm_folder))
+        print(f'There are {len(folders)} subjects.\n')
+        for folder in folders:
+            main(args, int(folder))
+    else:
+        main(args, 29)
