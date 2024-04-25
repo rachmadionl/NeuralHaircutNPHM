@@ -343,7 +343,10 @@ def main(args, number):
     
     if not args.use_flame:  # Chamfer Ears with Segmented Mesh
         print('Use Mesh Ear Segmentaton')
-        cham_scan_union, _, _, _ = pruned_chamfer_loss(verts_scan_union, verts_scan[ears_shrunked_filtered_idx])
+        cham_scan_union, _, _, _ = pruned_chamfer_loss(verts_scan_union.to('cuda'), verts_scan[ears_shrunked_filtered_idx].to('cuda'))
+        cham_scan_union = cham_scan_union.to('cpu')
+        verts_scan_union = verts_scan_union.to('cpu')
+
     else:  # Chamfer Ears with FLAME
         print('Use FLAME for Ear Segmentaton')
         cham_scan_union, _, _, _ = pruned_chamfer_loss(verts_scan_union.to('cuda'), verts_flame[ears_flame_idx])
@@ -451,6 +454,14 @@ def main(args, number):
     mesh_filename = f"./{args.out_folder}/{number}_mesh.obj"
     save_obj(mesh_filename, verts_final, faces_final)
 
+    mesh_final = o3d.geometry.TriangleMesh()
+    mesh_final.vertices = o3d.utility.Vector3dVector(verts_final)
+    mesh_final.triangles = o3d.utility.Vector3iVector(faces_final)
+    mesh_final = o3d.t.geometry.TriangleMesh.from_legacy(mesh_final).fill_holes().to_legacy()
+    mesh_final_filename = f"./{args.out_folder}/{number}_mesh_enclosed.obj"
+    o3d.visualization.draw([mesh_final])
+    o3d.io.write_triangle_mesh(mesh_final_filename, mesh_final)
+
     torch.cuda.empty_cache()
 
 if __name__ == '__main__':
@@ -472,4 +483,4 @@ if __name__ == '__main__':
         for folder in folders:
             main(args, int(folder))
     else:
-        main(args, 29)
+        main(args, args.number)
