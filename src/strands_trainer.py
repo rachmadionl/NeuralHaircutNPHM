@@ -36,6 +36,7 @@ class StrandsTrainer:
         self.sdfchamfer = SdfChamfer(**config['sdf_chamfer'])
         self.run_model = run_model
         self.strands_origins = None
+        self.orientation = torch.load('./preprocess_custom_data/39_orientation_maps.pt').to(self.device)
 
     def load_weights(self, path):
         state_dict = torch.load(path, map_location=self.device)
@@ -65,7 +66,6 @@ class StrandsTrainer:
 
         with freeze_gradients(model):
             out = self.run_model(model, self.strands_origins.view(-1, 3))
-
         # Calculate origin loss
         sdf = out[..., 0].view(-1, strand_len)
         sdf_inside = torch.relu(sdf[:, 1:])
@@ -73,7 +73,8 @@ class StrandsTrainer:
 
         # Calculate orientation loss
         prim_dir = self.strands_origins[:, 1:] - self.strands_origins[:, :-1] # [N_strands, strand_len-1, 3]
-        pred_dir = out[..., -3:].view(-1, strand_len, 3)[:, :-1] # [N_strands, strand_len-1, 3]
+        # pred_dir = out[..., -3:].view(-1, strand_len, 3)[:, :-1] # [N_strands, strand_len-1, 3]
+        pred_dir = F.interpolate(self.orientation[None, None, ...], (-1, strand_len, 3), mode='trilinear')[:, :-1] # [N_strands, strand_len-1, 3]
         
         # Calculate orientations only near the visible outer surface
         dist = self.sdfchamfer.points2face(self.sdfchamfer.mesh_outer_hair_remeshed, self.strands_origins[:, :-1, :].reshape(-1, 3)) 

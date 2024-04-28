@@ -56,26 +56,27 @@ def main(args):
     
     kernels = generate_gabor_filters(args.sigma_x, args.sigma_y, args.freq, args.num_filters)
     
-    img_list = sorted(os.listdir(img_path))
+    img_list = sorted(os.listdir(args.img_path))
+
     for img_name in tqdm.tqdm(img_list):
         basename = img_name.split('.')[0]
-        img = np.array(Image.open(os.path.join(img_path, img_name)))
+        img = np.array(Image.open(os.path.join(args.img_path, img_name)))
         F_orients = calc_orients(img, kernels)
         orientation_map = F_orients.argmax(0)
-        orientation_map_rad = orientation_map.astype('float16') / num_filters * math.pi
+        orientation_map_rad = orientation_map.astype('float16') / args.num_filters * math.pi
         confidence_map = calc_confidences(F_orients, orientation_map_rad)
 
-        cv2.imwrite(f'{orient_dir}/{basename}.png', orientation_map.astype('uint8'))
-        np.save(f'{conf_dir}/{basename}.npy', confidence_map.astype('float16'))
+        cv2.imwrite(f'{args.orient_dir}/{basename}.png', orientation_map.astype('uint8'))
+        np.save(f'{args.conf_dir}/{basename}.npy', confidence_map.astype('float16'))
 
 
         
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(conflict_handler='resolve')
 
-    parser.add_argument('--img_path', default='./implicit-hair-data/data/h3ds/00141/image/', type=str)
-    parser.add_argument('--orient_dir', default='./implicit-hair-data/data/h3ds/00141/orientation_maps/', type=str)
-    parser.add_argument('--conf_dir', default='./implicit-hair-data/data/h3ds/00141/confidence_maps/', type=str)
+    parser.add_argument('--img_path', default='./implicit-hair-data/data/monocular/person_0/image', type=str)
+    parser.add_argument('--orient_dir', default='./implicit-hair-data/data/monocular/person_0/orientation_maps/', type=str)
+    parser.add_argument('--conf_dir', default='./implicit-hair-data/data/monocular/person_0/confidence_maps/', type=str)
     parser.add_argument('--sigma_x', default=1.8, type=float)
     parser.add_argument('--sigma_y', default=2.4, type=float)
     parser.add_argument('--freq', default=0.23, type=float)

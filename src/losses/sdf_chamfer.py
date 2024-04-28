@@ -11,7 +11,8 @@ class SdfChamfer:
         self.num_points = num_points
         self.mesh_outer_hair = IO().load_mesh(mesh_outer_hair, device=device)
         # to ease the calculation of points2face distanse
-        self.mesh_outer_hair_remeshed =IO().load_mesh(mesh_outer_hair_remeshed, device=device) 
+        if mesh_outer_hair_remeshed is not None:
+            self.mesh_outer_hair_remeshed =IO().load_mesh(mesh_outer_hair_remeshed, device=device) 
         
     
     def points2face(self, mesh, points):

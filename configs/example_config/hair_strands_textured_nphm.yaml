@@ -1,11 +1,11 @@
 sdf_chamfer: {
       "mesh_outer_hair": "./implicit-hair-data/data/nphm/039/39_mesh.obj",
-      # "mesh_outer_hair_remeshed": "./implicit-hair-data/data/monocular/person_0/hair_outer_remeshed.ply",
-      "num_points": 10000,
+      "mesh_outer_hair_remeshed": "./implicit-hair-data/data/nphm/039/39_mesh_remeshed.obj",
+      "num_points": 30000,
       }
       
 textured_strands: {
-      "path_to_mesh": "./implicit-hair-data/data/nphm/039/registration.ply",
+      "path_to_mesh": "./implicit-hair-data/data/nphm/039/registration.obj",
       "decoder_checkpoint_path": "./pretrained_models/strand_prior/strand_ckpt.pth",
       "num_strands": 1000,
       "max_num_strands": 100000,

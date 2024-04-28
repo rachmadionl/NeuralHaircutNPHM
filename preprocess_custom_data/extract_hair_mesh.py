@@ -454,14 +454,6 @@ def main(args, number):
     mesh_filename = f"./{args.out_folder}/{number}_mesh.obj"
     save_obj(mesh_filename, verts_final, faces_final)
 
-    mesh_final = o3d.geometry.TriangleMesh()
-    mesh_final.vertices = o3d.utility.Vector3dVector(verts_final)
-    mesh_final.triangles = o3d.utility.Vector3iVector(faces_final)
-    mesh_final = o3d.t.geometry.TriangleMesh.from_legacy(mesh_final).fill_holes().to_legacy()
-    mesh_final_filename = f"./{args.out_folder}/{number}_mesh_enclosed.obj"
-    o3d.visualization.draw([mesh_final])
-    o3d.io.write_triangle_mesh(mesh_final_filename, mesh_final)
-
     torch.cuda.empty_cache()
 
 if __name__ == '__main__':
