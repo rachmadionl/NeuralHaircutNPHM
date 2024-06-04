@@ -16,6 +16,7 @@ from pytorch3d.structures import Meshes
 
 sys.path.append(os.path.join(sys.path[0], '..'))
 from src.hair_networks.sdf import HairSDFNetwork
+from src.hair_networks.levelsetudf import LevelSetUDFNetwork
 from src.utils.geometry import face_vertices
 
 import argparse
@@ -44,8 +45,8 @@ def main(args):
     scalp_faces = torch.load('./data/new_scalp_faces.pth')[None].cuda() 
     scalp_uvs = torch.load('./data/new_scalp_uvcoords.pth')[None].cuda()
 
-    path_to_mesh = os.path.join(args.path_to_data, args.scene_type, args.case, 'head_prior.obj')
-    path_to_ckpt = os.path.join(args.path_to_data, args.scene_type, args.case, 'ckpt_final.pth')
+    path_to_mesh = os.path.join(args.path_to_data, args.scene_type, args.case, 'registration_scaled_0.9.obj')
+    path_to_ckpt = os.path.join(args.path_to_data, args.scene_type, args.case, 'levelsetudf_040000.pth')
     
     save_path = os.path.join(args.path_to_data, args.scene_type, args.case)
     
@@ -62,20 +63,21 @@ def main(args):
     # Upload config  
 
     with open(args.conf_path, 'r') as f:
-        replaced_conf = str(yaml.load(f, Loader=yaml.Loader)).replace('CASE_NAME', args.case)
-        conf = yaml.load(replaced_conf, Loader=yaml.Loader)
+        # replaced_conf = str(yaml.load(f, Loader=yaml.Loader)).replace('CASE_NAME', args.case)
+        conf = yaml.load(f, Loader=yaml.Loader)
             
 
-    hair_network = HairSDFNetwork(**conf['model']['hair_sdf_network']).to(args.device)
+    hair_network = LevelSetUDFNetwork(**conf['udf_network']).to(args.device)
     checkpoint = torch.load(path_to_ckpt, map_location=args.device)
-    hair_network.load_state_dict(checkpoint['hair_network'])
+    hair_network.load_state_dict(checkpoint['udf_network_fine'])
     
     # Calculate sdf at scalp vertices
     sdf = hair_network(scalp_mesh.verts_packed())[..., 0]
     
     # Consider verices that close to sdf
-    sorted_idx = torch.where(sdf < args.distance)[0]
-    
+    sorted_idx_sdf = torch.where(sdf < args.distance)[0]
+    sorted_idx_yval = torch.where(scalp_mesh.verts_packed()[:, 1] > 0.25)[0]
+    sorted_idx = torch.cat([sorted_idx_sdf, sorted_idx_yval], dim=0)
     # Cut new scalp
     a = np.array(sorted(sorted_idx.cpu()))
     b = np.arange(a.shape[0])
@@ -106,17 +108,17 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(conflict_handler='resolve')
 
-    parser.add_argument('--conf_path', default='./configs/monocular/neural_strands.yaml', type=str)
+    parser.add_argument('--conf_path', default='./configs/example_config/hair_strands_textured_nphm.yaml', type=str)
         
-    parser.add_argument('--case', default='person_1', type=str)
+    parser.add_argument('--case', default='039', type=str)
     
-    parser.add_argument('--scene_type', default='monocular', type=str, choices=['h3ds', 'monocular']) 
+    parser.add_argument('--scene_type', default='nphm', type=str, choices=['h3ds', 'monocular', 'nphm']) 
     
     parser.add_argument('--path_to_data', default='./implicit-hair-data/data/', type=str)  
 
     parser.add_argument('--device', default='cuda', type=str)
     
-    parser.add_argument('--distance', default=0.07, type=float)
+    parser.add_argument('--distance', default=0.06, type=float)
 
     
     args, _ = parser.parse_known_args()

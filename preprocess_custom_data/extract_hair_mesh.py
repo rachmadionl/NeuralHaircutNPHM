@@ -211,11 +211,13 @@ def get_border_edges_and_extract_the_vertice(mesh):
     return verts_idx
 
 
-def remove_vertices_and_corresponding_faces(ver, faces, mask):
+def remove_vertices_and_corresponding_faces(ver, faces, mask, ver_n = None):
     # ver: (N, 3) torch tensor float32
     # faces: (N, 3) torch tensor long
     # mask: (N,) torch tensor bool (1 = keep; 0 = omit)
 
+    if ver_n is not None:
+        assert len(ver) == len(ver_n)
     ver_to_keep = torch.arange(ver.shape[0]).to(ver.device)[mask]
     ver_new = ver[ver_to_keep]
     new2old = torch.arange(ver.shape[0]).to(ver.device)[mask]
@@ -223,6 +225,9 @@ def remove_vertices_and_corresponding_faces(ver, faces, mask):
     old2new[new2old] = torch.arange(new2old.shape[0]).to(ver.device)
     faces_new = faces[torch.all(mask[faces], dim=1)]
     faces_new = old2new[faces_new]
+    if ver_n is not None:
+        ver_n_new = ver_n[ver_to_keep]
+        return ver_new, ver_n_new, faces_new
     return ver_new, faces_new
 
 # List of Segmentation Mesh Color:
@@ -382,7 +387,7 @@ def main(args, number):
     # o3d.visualization.draw_geometries([cl])
 
     mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=8)
-    mesh.compute_vertex_normals()
+    # mesh.compute_vertex_normals()
     mesh.paint_uniform_color([0.639, 0.639, 0.592])
     # print('Displaying reconstructed mesh ...')
     # o3d.visualization.draw([mesh])
@@ -404,8 +409,7 @@ def main(args, number):
     vertices_low_density_mask = densities < np.quantile(densities, 0.01)
     vertices_low_density = verts[vertices_low_density_mask]
 
-    # breakpoint()
-    if (np.max(vertices_low_density[:, 1]) - np.max(verts)) <= 0.2: # Low Density Area at Top, do not filter them out.
+    if np.abs(np.max(vertices_low_density[:, 1]) - np.max(verts[:, 1])) <= 0.2: # Low Density Area at Top, do not filter them out.
         vertices_low_y_mask = verts[:, 1] < (np.max(vertices_low_density[:, 1]) - 0.1)
         vertices_to_remove = np.multiply(vertices_low_density_mask, vertices_low_y_mask)
     else:
@@ -444,22 +448,47 @@ def main(args, number):
 
     verts = torch.from_numpy(np.asarray(mesh.vertices))
     faces = torch.from_numpy(np.asarray(mesh.triangles))
+    verts_n = torch.from_numpy(np.asarray(mesh.vertex_normals))
     mesh_torch = Meshes(verts=[verts], faces=[faces])
     verts_border_mask = torch.zeros(verts.size(0))
     verts_border_mask[verts_border_idx] = 1
     for _ in range(3):
         verts_border_mask = dilate_vertex_mask(mesh_torch.edges_packed(), verts_border_mask)
 
-    verts_final, faces_final = remove_vertices_and_corresponding_faces(verts, faces.long(), ~verts_border_mask)
+    verts_final, verts_n_final, faces_final = remove_vertices_and_corresponding_faces(verts, faces.long(), ~verts_border_mask, verts_n)
     mesh_filename = f"./{args.out_folder}/{number}_mesh.obj"
-    save_obj(mesh_filename, verts_final, faces_final)
+    verts_n_final = F.normalize(verts_n_final, p=2, dim=1)
+    mesh_final = Meshes(verts=[verts_final], verts_normals=[verts_n_final], faces=[faces_final])
+    IO().save_mesh(mesh_final, mesh_filename)
 
+    verts_scan, faces_scan, aux_scan = load_obj(filename_scan, device='cuda:0')
+    chamf_scan, _, _, _ = pruned_chamfer_loss(verts_scan.to(torch.float32), verts_final.to(device='cuda:0', dtype=torch.float32))
+    chamf_mask = chamf_scan <= 1e-4
+    verts_orig, faces_orig = remove_vertices_and_corresponding_faces(verts_scan, faces_scan.verts_idx.long(), chamf_mask)
+    # mesh_orig = Meshes(verts=[verts_orig], faces=[faces_orig])
+    # mesh_orig
+    # IO().save_mesh(mesh_orig, f"./{args.out_folder}/{number}_mesh_orig.obj")
+    mesh_o3d = o3d.geometry.TriangleMesh(
+        vertices=o3d.utility.Vector3dVector(verts_orig.numpy(force=True)),
+        triangles=o3d.utility.Vector3iVector(faces_orig.numpy(force=True))
+    )
+    with o3d.utility.VerbosityContextManager(
+            o3d.utility.VerbosityLevel.Debug) as cm:
+        triangle_clusters, cluster_n_triangles, cluster_area = (
+            mesh_o3d.cluster_connected_triangles())
+    triangle_clusters = np.asarray(triangle_clusters)
+    cluster_n_triangles = np.asarray(cluster_n_triangles)
+    cluster_area = np.asarray(cluster_area)
+    largest_cluster_idx = cluster_n_triangles.argmax()
+    triangles_to_remove = triangle_clusters != largest_cluster_idx
+    mesh_o3d.remove_triangles_by_mask(triangles_to_remove)
+    o3d.io.write_triangle_mesh(f"./{args.out_folder}/{number}_mesh_orig.obj", mesh_o3d)
     torch.cuda.empty_cache()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--nphm_folder', type=str, default='/home/rachmadio/dev/data/NPHM/scan')
-    parser.add_argument('--out_folder', type=str, default='results')
+    parser.add_argument('--out_folder', type=str, default='pipeline_orig_ear_segmented_mesh')
     parser.add_argument('--use_flame', type=bool, default=False)
     parser.add_argument('--number', type=int, default=None)
     args = parser.parse_args()

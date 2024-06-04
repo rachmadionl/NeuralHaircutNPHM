@@ -30,5 +30,6 @@ sdf, mesh = mesh2sdf.compute(
 t1 = time.time()
 
 # output
+np.save(filename[:-8] + '.npy', sdf)
 mesh.vertices = mesh.vertices / scale + center
-mesh.export('mesh_256.obj')
+# mesh.export('mesh_256.obj')
