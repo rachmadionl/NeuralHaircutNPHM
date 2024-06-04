@@ -10,6 +10,7 @@ class SdfChamfer:
 
         self.num_points = num_points
         self.mesh_outer_hair = IO().load_mesh(mesh_outer_hair, device=device)
+        self.n_points = self.mesh_outer_hair.verts_packed().shape[0]
         # to ease the calculation of points2face distanse
         if mesh_outer_hair_remeshed is not None:
             self.mesh_outer_hair_remeshed =IO().load_mesh(mesh_outer_hair_remeshed, device=device) 
@@ -36,3 +37,12 @@ class SdfChamfer:
         # calculate one-way chamfer
         loss_chamf, _ = chamfer_distance(sample_points, points)
         return loss_chamf
+    
+    def calc_orient(self, points, points_normals):
+        _, loss_orient = chamfer_distance(
+            x = points,
+            x_normals = points_normals,
+            y = self.mesh_outer_hair.verts_packed().to(points.dtype).unsqueeze(0),
+            y_normals = self.mesh_outer_hair.verts_normals_packed().to(points.dtype).unsqueeze(0)
+        )
+        return loss_orient

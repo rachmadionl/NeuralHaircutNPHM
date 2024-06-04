@@ -1,5 +1,5 @@
 import torch
-from pytorch3d.io import load_obj
+from pytorch3d.io import IO, load_obj
 from pytorch3d.renderer.mesh import TexturesVertex
 from pytorch3d.structures import Meshes
 from torch import nn
@@ -69,7 +69,10 @@ class OptimizableTexturedStrands(nn.Module):
         scalp_uvs = torch.load('./data/new_scalp_uvcoords.pth').cuda()[None] # generated in Blender uv map for the scalp
 
         # Load FLAME head mesh
-        verts, faces, _ = load_obj(path_to_mesh, device='cuda')
+        mesh = IO().load_mesh(path_to_mesh, device='cuda')
+        verts = mesh.verts_packed()
+        faces = mesh.faces_packed()
+        # verts, faces, _ = load_obj(path_to_mesh, device='cuda')
         
         # Transform head mesh if it's not in unit sphere (same scale used for world-->unit_sphere transform)
         self.transform = None
@@ -79,7 +82,7 @@ class OptimizableTexturedStrands(nn.Module):
             verts = (verts - torch.tensor(self.transform['translation'], device=verts.device)) / self.transform['scale']
        
             
-        head_mesh =  Meshes(verts=[(verts)], faces=[faces.verts_idx]).cuda()
+        head_mesh =  Meshes(verts=[(verts)], faces=[faces]).cuda()
         
         # Scaling factor, as decoder pretrained on synthetic data with fixed head scale
         usc_scale = torch.tensor([[0.2579, 0.4082, 0.2580]]).cuda()

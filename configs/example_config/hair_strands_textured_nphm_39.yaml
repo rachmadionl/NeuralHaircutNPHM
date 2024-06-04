@@ -1,24 +1,24 @@
 sdf_chamfer: {
-      "mesh_outer_hair": "./implicit-hair-data/data/nphm/039/39_mesh.obj",
+      "mesh_outer_hair": "./implicit-hair-data/data/nphm/039/39_mesh_w_normals.obj",
       "mesh_outer_hair_remeshed": "./implicit-hair-data/data/nphm/039/39_mesh_remeshed.obj",
-      "num_points": 30000,
+      "num_points": 60000,
       }
       
 textured_strands: {
-      "path_to_mesh": "./implicit-hair-data/data/nphm/039/registration.obj",
+      "path_to_mesh": "./implicit-hair-data/data/nphm/039/registration_scaled_0.9.obj",
       "decoder_checkpoint_path": "./pretrained_models/strand_prior/strand_ckpt.pth",
-      "num_strands": 1000,
+      "num_strands": 1600,
       "max_num_strands": 100000,
       "texture_size": 256,
       "geometry_descriptor_size": 64,
       "appearance_descriptor_size": 16,
-      # "cut_scalp": "./implicit-hair-data/data/monocular/person_0/cut_scalp_verts.pickle"
+      "cut_scalp": "./implicit-hair-data/data/nphm/039/cut_scalp_verts.pickle"
   }
 
 diffusion_prior: {
       "use_diffusion": true,
       "start_denoise": 1,
-      # "diffuse_mask": "./implicit-hair-data/data/monocular/person_0/dif_mask.png",
+      "diffuse_mask": "./implicit-hair-data/data/nphm/039/dif_mask.png",
       "diffuse_bs": 32,
       "dif_path": "./pretrained_models/diffusion_prior/dif_ckpt.pth",  
        model: {
@@ -68,6 +68,8 @@ general: {
     "starting_rendering_iter": 1,
     "gamma": 0.5,
     "milestones": [40000, 60000, 80000], 
+    "orientation_path": "implicit-hair-data/data/nphm/039/39_orients_crest_orig.ply",
+    "sdf_path": "implicit-hair-data/data/nphm/039/ckpt_040000.pth",
   }
   
 loss_factors: {
@@ -79,3 +81,28 @@ loss_factors: {
     "raster_alpha": 0.0,
     "L_diff": 0.001,
   }
+
+udf_network: {
+    "d_out": 1,
+    "d_in": 3,
+    "d_hidden": 256,
+    "n_layers": 8,
+    "skip_in": [4],
+    "multires": 0,
+    "bias": 0.5,
+    "scale": 1.0,
+    "geometric_init": True,
+    "weight_norm": True,
+  }
+
+nsh_network: {
+  "latent_size": 0,
+  "in_dim": 3,
+  "decoder_hidden_dim": 256,
+  "nl": "sine",
+  "decoder_n_hidden_layers": 4,
+  "init_type": "siren",
+  "sphere_init_params": [1.6, 0.1],
+  "udf": False,
+  "vae": False,
+}

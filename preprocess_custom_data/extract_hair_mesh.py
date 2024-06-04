@@ -382,7 +382,7 @@ def main(args, number):
     # o3d.visualization.draw_geometries([cl])
 
     mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(pcd, depth=8)
-    mesh.compute_vertex_normals()
+    mesh.vertex_normals = o3d.utility.Vector3dVector(aux_normals_final)
     mesh.paint_uniform_color([0.639, 0.639, 0.592])
     # print('Displaying reconstructed mesh ...')
     # o3d.visualization.draw([mesh])
@@ -459,7 +459,7 @@ def main(args, number):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--nphm_folder', type=str, default='/home/rachmadio/dev/data/NPHM/scan')
-    parser.add_argument('--out_folder', type=str, default='results')
+    parser.add_argument('--out_folder', type=str, default='./implicit-hair-data/data/nphm/039/results_normals')
     parser.add_argument('--use_flame', type=bool, default=False)
     parser.add_argument('--number', type=int, default=None)
     args = parser.parse_args()

@@ -1,14 +1,14 @@
+from pytorch3d.io import IO
 import torch
 import torch.nn.functional as F
-import yaml
+
 from src.hair_networks.optimizable_textured_strands import OptimizableTexturedStrands
 from src.hair_networks.strands_renderer import Renderer
 from src.losses.sdf_chamfer import SdfChamfer
-import os
-import torch.nn as nn
-import numpy as np
+from src.losses.one_way_chamfer import chamfer_distance
 
 from src.utils.util import freeze_gradients
+
 
 class StrandsTrainer:
     def __init__(self, config, run_model=None, device=None, save_dir=None) -> None:
@@ -36,7 +36,17 @@ class StrandsTrainer:
         self.sdfchamfer = SdfChamfer(**config['sdf_chamfer'])
         self.run_model = run_model
         self.strands_origins = None
-        self.orientation = torch.load('./preprocess_custom_data/39_orientation_maps.pt').to(self.device)
+        self.orientation = IO().load_pointcloud(config['general']['orientation_path'], device=self.device)
+    
+    def get_latent_codes(self):
+        """
+        :return: latent codes which were optimized during training
+        """
+        latent_codes = torch.nn.Embedding.from_pretrained(
+            torch.load('./implicit-hair-data/data/nphm/039/latent_best.ckpt', map_location='cpu')['weight']
+        )
+        latent_codes.to(self.device)
+        return latent_codes
 
     def load_weights(self, path):
         state_dict = torch.load(path, map_location=self.device)
@@ -57,29 +67,47 @@ class StrandsTrainer:
             state_dict['strands_render'] = self.strands_render.state_dict()
         torch.save(state_dict, path)
 
+    def sort_by_norm(self, tensor: torch.Tensor) -> torch.Tensor:
+        norm = torch.norm(tensor, p=2, dim=1)
+        idx = torch.argsort(norm, stable=True)
+        return tensor[idx]
 
     def train_step(self, model=None, it=0, raster_dict=None):
         losses = {}
 
         self.strands_origins, z_geom, z_app, dif_dict = self.strands(it=it)
         strand_len = self.strands_origins.shape[1]
-
+        
         with freeze_gradients(model):
             out = self.run_model(model, self.strands_origins.view(-1, 3))
+            # grads = model.gradient(self.strands_origins.view((-1, 3)))
+            # if it == 0:
+            #     evaluate_hairsdf_on_grid(model.decoder, self.device, 256, 'sdf_output_nsh.obj')
+
         # Calculate origin loss
-        sdf = out[..., 0].view(-1, strand_len)
+        # sdf = out[..., 0].view(-1, strand_len)
+        sdf = out.view(-1, strand_len)
         sdf_inside = torch.relu(sdf[:, 1:])
         losses['volume'] = F.mse_loss(sdf_inside, torch.zeros_like(sdf_inside))
 
         # Calculate orientation loss
         prim_dir = self.strands_origins[:, 1:] - self.strands_origins[:, :-1] # [N_strands, strand_len-1, 3]
-        # pred_dir = out[..., -3:].view(-1, strand_len, 3)[:, :-1] # [N_strands, strand_len-1, 3]
-        pred_dir = F.interpolate(self.orientation[None, None, ...], (-1, strand_len, 3), mode='trilinear')[:, :-1] # [N_strands, strand_len-1, 3]
-        
-        # Calculate orientations only near the visible outer surface
+
+        # n_strands = prim_dir.shape[0]
+        # pred_dir = F.grid_sample(self.orientation[None, None, ...].type(torch.float32), self.grid, align_corners=True, mode='bilinear')
+        # pred_dir = pred_dir.squeeze()[:, :-1]
+
+        # # Calculate orientations only near the visible outer surface
         dist = self.sdfchamfer.points2face(self.sdfchamfer.mesh_outer_hair_remeshed, self.strands_origins[:, :-1, :].reshape(-1, 3)) 
         filtered_idx = torch.nonzero(dist[0] <= 0.001).reshape(-1)
-        losses['orient'] = (1 - torch.abs(torch.cosine_similarity(prim_dir.reshape(-1, 3)[filtered_idx], pred_dir.reshape(-1, 3)[filtered_idx], dim=-1))).mean()
+        # losses['orient'] = (1 - torch.abs(torch.cosine_similarity(prim_dir.reshape(-1, 3)[filtered_idx], self.orientation[filtered_idx], dim=-1))).mean()
+        _, loss_orient = chamfer_distance(
+            x = self.strands_origins[:, :-1, :].reshape(-1, 3)[filtered_idx].unsqueeze(0),
+            x_normals = prim_dir.reshape(-1, 3)[filtered_idx].unsqueeze(0),
+            y = self.orientation.points_packed().to(prim_dir.dtype).unsqueeze(0), 
+            y_normals = self.orientation.normals_packed().to(prim_dir.dtype).unsqueeze(0)
+        )
+        losses['orient'] = loss_orient
 
         # Calculate chamfer on visible outer surface
         if self.sdfchamfer is not None:

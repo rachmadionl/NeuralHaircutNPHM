@@ -24,6 +24,10 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from src.hair_networks.sdf import HairSDFNetwork
+from src.hair_networks.deepsdf import DeepSDFDecoder
+from src.hair_networks.capudf import CAPUDFNetwork
+from src.hair_networks.levelsetudf import LevelSetUDFNetwork
+from src.hair_networks.nsh import NSH
 from src.strands_trainer import StrandsTrainer
 import yaml
 from copy import deepcopy
@@ -72,80 +76,115 @@ class Runner:
         os.makedirs(os.path.join(self.base_exp_dir, 'meshes'), exist_ok=True)
         os.makedirs(os.path.join(self.base_exp_dir, 'hair_primitives'), exist_ok=True)
         
-        if scene_type == 'h3ds':
-            self.dataset = H3DSDatasetTorch(self.batch_size, self.conf['dataset'])
-        else:
-            self.dataset = MonocularDatasetTorch(self.batch_size, self.conf['dataset'])
+        # if scene_type == 'h3ds':
+        #     self.dataset = H3DSDatasetTorch(self.batch_size, self.conf['dataset'])
+        # else:
+        #     self.dataset = MonocularDatasetTorch(self.batch_size, self.conf['dataset'])
         
         self.iter_step = 0
 
         self.writer = None
         set_seed(42)
 
-        self.hair_primitives_trainer = StrandsTrainer(self.hair_conf, run_model= lambda model, x: model(x, calc_orient=True), device=self.device, save_dir=self.base_exp_dir)
-        
-        self.hair_network = HairSDFNetwork(**self.conf['model']['hair_sdf_network']).to(self.device)
-        
-#         Upload volumetric geometry and surface orientation fields
-        if train_conf['pretrain_path']:
-            print('Upload sdf hair geometry and orientation field!')
-            checkpoint = torch.load(train_conf['pretrain_path'], map_location=self.device)
-            self.hair_network.load_state_dict(checkpoint['hair_network'])
+        self.hair_primitives_trainer = StrandsTrainer(self.hair_conf, run_model= lambda model, x: model(x), device=self.device, save_dir=self.base_exp_dir)
+        self.hair_network = self.get_levelset_udf()
 
-#         Upload strand-based geometry         
+        # Upload strand-based geometry         
         if train_conf['pretrain_strands_path']: 
             print('Upload strands!')
             self.hair_primitives_trainer.load_weights(train_conf['pretrain_hair_path'])
            
         # Backup codes and configs for debug
         self.file_backup()
-
+    
+    def get_hair_deepsdf(self):
+        """
+        :return: trained deep sdf model loaded from disk
+        """
+        model = DeepSDFDecoder(256)
+        model.load_state_dict(torch.load('./implicit-hair-data/data/nphm/039/model_best.ckpt', map_location='cpu'))
+        model.eval()
+        model.to(self.device)
+        return model
+    
+    def get_cap_udf(self):
+        """
+        :return: trained deep sdf model loaded from disk
+        """
+        model = CAPUDFNetwork(**self.hair_conf['udf_network'])
+        state_dict = torch.load('./implicit-hair-data/data/nphm/039/ckpt_080000.pth', map_location='cpu')
+        model.load_state_dict(state_dict['udf_network_fine'])
+        model.eval()
+        model.to(self.device)
+        return model
+    
+    def get_nsh(self):
+        """
+        :return: trained deep sdf model loaded from disk
+        """
+        model = NSH(**self.hair_conf['nsh_network'])
+        state_dict = torch.load('./implicit-hair-data/data/nphm/039/ckpt_009999.pth', map_location='cpu')
+        model.load_state_dict(state_dict)
+        model.eval()
+        model.to(self.device)
+        return model
+    
+    def get_levelset_udf(self):
+        """
+        :return: trained deep sdf model loaded from disk
+        """
+        model = LevelSetUDFNetwork(**self.hair_conf['udf_network'])
+        state_dict = torch.load(self.hair_conf['general']['sdf_path'], map_location='cpu')
+        model.load_state_dict(state_dict['udf_network_fine'])
+        model.eval()
+        model.to(self.device)
+        return model
     
     def train(self):
         res_step = self.end_iter - self.iter_step
         self.writer = SummaryWriter(log_dir=os.path.join(self.base_exp_dir, 'logs'))
-        image_perm = self.get_image_perm()
+        # image_perm = self.get_image_perm()
         losses = {}
 
         
-        bound_min = torch.tensor(self.dataset.object_bbox_min, dtype=torch.float32)
-        bound_max = torch.tensor(self.dataset.object_bbox_max, dtype=torch.float32)
+        # bound_min = torch.tensor(self.dataset.object_bbox_min, dtype=torch.float32)
+        # bound_max = torch.tensor(self.dataset.object_bbox_max, dtype=torch.float32)
         
         for _ in tqdm(range(res_step)):            
-            cur_img = image_perm[self.iter_step % len(image_perm)]
-            # _, cam_intr, cam_pose = self.dataset.gen_random_rays_at(cur_img, self.batch_size)
-            return_dict = self.dataset[cur_img]
-            cam_extr = torch.linalg.inv(return_dict['pose'].detach())
+            # cur_img = image_perm[self.iter_step % len(image_perm)]
+            # # _, cam_intr, cam_pose = self.dataset.gen_random_rays_at(cur_img, self.batch_size)
+            # return_dict = self.dataset[cur_img]
+            # cam_extr = torch.linalg.inv(return_dict['pose'].detach())
 
-            orig_data_size = return_dict['H'] # H shape, suppose square images
+            # orig_data_size = return_dict['H'] # H shape, suppose square images
             
-            raster_dict = {}
-            raster_dict['iter'] = self.iter_step
-            raster_dict['cam_extr'] = cam_extr
+            # raster_dict = {}
+            # raster_dict['iter'] = self.iter_step
+            # raster_dict['cam_extr'] = cam_extr
             
-            if orig_data_size is None:
-                # raster_dict['cam_intr'] = cam_intr
-                # raster_dict['gt_silh'] = self.dataset.hair_masks[cur_img].permute(2, 0, 1).cuda()
-                # raster_dict['gt_rgb'] = self.dataset.images[cur_img].permute(2, 0, 1).cuda()
-                raster_dict['cam_intr'] = return_dict['intrinsic']
-                raster_dict['gt_silh'] = return_dict['hair_mask']
-                raster_dict['gt_rgb'] = return_dict['image']
-            else:
-                # need to change cameras intrinsic as we render in resolution 512x512
-                scale_factor = orig_data_size / self.img_size
-                # raster_dict['cam_intr'] = scale_mat(deepcopy(cam_intr), scale_factor)
-                # raster_dict['gt_silh'] = F.interpolate(self.dataset.hair_masks[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
-                # raster_dict['gt_rgb'] = F.interpolate(self.dataset.images[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
-                raster_dict['cam_intr'] = scale_mat(deepcopy(return_dict['intrinsic']), scale_factor)
-                raster_dict['gt_silh'] = F.interpolate(return_dict['hair_mask'][None], size=self.img_size, mode='bilinear')[0].cuda()
-                raster_dict['gt_rgb'] = F.interpolate(return_dict['image'][None], size=self.img_size, mode='bilinear')[0].cuda()
+            # if orig_data_size is None:
+            #     # raster_dict['cam_intr'] = cam_intr
+            #     # raster_dict['gt_silh'] = self.dataset.hair_masks[cur_img].permute(2, 0, 1).cuda()
+            #     # raster_dict['gt_rgb'] = self.dataset.images[cur_img].permute(2, 0, 1).cuda()
+            #     raster_dict['cam_intr'] = return_dict['intrinsic']
+            #     raster_dict['gt_silh'] = return_dict['hair_mask']
+            #     raster_dict['gt_rgb'] = return_dict['image']
+            # else:
+            #     # need to change cameras intrinsic as we render in resolution 512x512
+            #     scale_factor = orig_data_size / self.img_size
+            #     # raster_dict['cam_intr'] = scale_mat(deepcopy(cam_intr), scale_factor)
+            #     # raster_dict['gt_silh'] = F.interpolate(self.dataset.hair_masks[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
+            #     # raster_dict['gt_rgb'] = F.interpolate(self.dataset.images[cur_img].permute(2, 0, 1)[None], size=self.img_size, mode='bilinear')[0].cuda()
+            #     raster_dict['cam_intr'] = scale_mat(deepcopy(return_dict['intrinsic']), scale_factor)
+            #     raster_dict['gt_silh'] = F.interpolate(return_dict['hair_mask'][None], size=self.img_size, mode='bilinear')[0].cuda()
+            #     raster_dict['gt_rgb'] = F.interpolate(return_dict['image'][None], size=self.img_size, mode='bilinear')[0].cuda()
 
 
-            # raster_dict['visual_gt_orients'] = self.dataset.orient_at(cur_img, resolution_level=1)
-            raster_dict['visual_gt_orients'] = return_dict['orient_image']
+            # # raster_dict['visual_gt_orients'] = self.dataset.orient_at(cur_img, resolution_level=1)
+            # raster_dict['visual_gt_orients'] = return_dict['orient_image']
             
             losses.update({
-                'hair_' + str(key): val for key, val in self.hair_primitives_trainer.train_step(model=self.hair_network, it=self.iter_step, raster_dict=raster_dict).items()
+                'hair_' + str(key): val for key, val in self.hair_primitives_trainer.train_step(model=self.hair_network, it=self.iter_step, raster_dict=None).items()
                 })
 
             self.iter_step += 1
@@ -157,8 +196,8 @@ class Runner:
             if self.iter_step % self.report_freq == 0:
                 self.save_strands_pointcloud()
             
-            if self.iter_step % len(image_perm) == 0:
-                image_perm = self.get_image_perm()
+            # if self.iter_step % len(image_perm) == 0:
+            #     image_perm = self.get_image_perm()
             
             if self.iter_step % self.report_freq == 0:
                 self.hair_primitives_trainer.save_weights(os.path.join(self.base_exp_dir, 'hair_primitives', 'ckpt_{:0>6d}.pth'.format(self.iter_step)))
