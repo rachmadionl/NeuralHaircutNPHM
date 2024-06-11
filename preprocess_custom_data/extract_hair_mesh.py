@@ -458,8 +458,14 @@ def main(args, number):
     verts_final, verts_n_final, faces_final = remove_vertices_and_corresponding_faces(verts, faces.long(), ~verts_border_mask, verts_n)
     mesh_filename = f"./{args.out_folder}/{number}_mesh.obj"
     verts_n_final = F.normalize(verts_n_final, p=2, dim=1)
-    mesh_final = Meshes(verts=[verts_final], verts_normals=[verts_n_final], faces=[faces_final])
-    IO().save_mesh(mesh_final, mesh_filename)
+    # mesh_final = Meshes(verts=[verts_final], verts_normals=[verts_n_final], faces=[faces_final])
+    # IO().save_mesh(mesh_final, mesh_filename)
+    mesh_reconstructed = o3d.geometry.TriangleMesh(
+        vertices=o3d.utility.Vector3dVector(verts_final.numpy(force=True)),
+        triangles=o3d.utility.Vector3iVector(faces_final.numpy(force=True))
+    )
+    # mesh_reconstructed.vertex_normals = o3d.utility.Vector3dVector(verts_n_final.numpy(force=True))
+    o3d.io.write_triangle_mesh(mesh_filename, mesh_reconstructed)
 
     verts_scan, faces_scan, aux_scan = load_obj(filename_scan, device='cuda:0')
     chamf_scan, _, _, _ = pruned_chamfer_loss(verts_scan.to(torch.float32), verts_final.to(device='cuda:0', dtype=torch.float32))
