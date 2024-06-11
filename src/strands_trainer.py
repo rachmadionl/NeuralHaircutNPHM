@@ -105,9 +105,11 @@ class StrandsTrainer:
             x = self.strands_origins[:, :-1, :].reshape(-1, 3)[filtered_idx].unsqueeze(0),
             x_normals = prim_dir.reshape(-1, 3)[filtered_idx].unsqueeze(0),
             y = self.orientation.points_packed().to(prim_dir.dtype).unsqueeze(0), 
-            y_normals = self.orientation.normals_packed().to(prim_dir.dtype).unsqueeze(0)
+            y_normals = self.orientation.normals_packed().to(prim_dir.dtype).unsqueeze(0),
+            batch_reduction=None
         )
-        losses['orient'] = loss_orient
+        losses['orient'] = loss_orient.mean(dim=1)
+        self.loss_orient = loss_orient.detach().clone().reshape(-1, strand_len - 1).numpy(force=True)
 
         # Calculate chamfer on visible outer surface
         if self.sdfchamfer is not None:

@@ -13,6 +13,7 @@ from pathlib import Path
 from shutil import copyfile
 
 import cv2 as cv
+import matplotlib as mpl
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -74,6 +75,7 @@ class Runner:
         
         os.makedirs(self.base_exp_dir, exist_ok=True)                    
         os.makedirs(os.path.join(self.base_exp_dir, 'meshes'), exist_ok=True)
+        os.makedirs(os.path.join(self.base_exp_dir, 'orients'), exist_ok=True)
         os.makedirs(os.path.join(self.base_exp_dir, 'hair_primitives'), exist_ok=True)
         
         # if scene_type == 'h3ds':
@@ -96,6 +98,9 @@ class Runner:
            
         # Backup codes and configs for debug
         self.file_backup()
+
+        # Orientation loss visualization
+        self.cmap = mpl.colormaps['viridis']
     
     def get_hair_deepsdf(self):
         """
@@ -193,7 +198,7 @@ class Runner:
                 for k, v in losses.items():
                     self.writer.add_scalar(f'Loss/{k}', v, self.iter_step)
 
-            if self.iter_step % self.report_freq == 0:
+            if self.iter_step % self.report_freq == 0 or self.iter_step == 1:
                 self.save_strands_pointcloud()
             
             # if self.iter_step % len(image_perm) == 0:
@@ -207,8 +212,11 @@ class Runner:
         if self.hair_primitives_trainer:
             strands_origins = self.hair_primitives_trainer.strands_origins.reshape(-1, 100, 3)
             
-            cols = torch.cat((torch.rand(strands_origins.shape[0], 3).unsqueeze(1).repeat(1, 100, 1), torch.ones(strands_origins.shape[0], 100, 1)), dim=-1).reshape(-1, 4).cpu()           
+
+            cols = torch.cat((torch.rand(strands_origins.shape[0], 3).unsqueeze(1).repeat(1, 100, 1), torch.ones(strands_origins.shape[0], 100, 1)), dim=-1).reshape(-1, 4).cpu()
+            orient_colors = np.reshape(np.concatenate([self.cmap(self.hair_primitives_trainer.loss_orient), np.ones([1900, 1, 4])], axis=1), (-1, 4))
             trimesh.PointCloud(strands_origins.reshape(-1, 3).detach().cpu(), colors=cols).export(os.path.join(self.base_exp_dir, 'meshes', '{:0>8d}_strands_points.ply'.format(self.iter_step)))
+            trimesh.PointCloud(strands_origins.reshape(-1, 3).detach().cpu(), colors=orient_colors).export(os.path.join(self.base_exp_dir, 'orients', '{:0>8d}_strands_points.ply'.format(self.iter_step)))
 
     
     def get_image_perm(self):

@@ -183,15 +183,15 @@ def chamfer_distance(
     # Apply point reduction
     cham_x = cham_x.sum(1)  # (N,)
     cham_y = cham_y.sum(1)  # (N,)
-    if return_normals:
-        cham_norm_x = cham_norm_x.sum(1)  # (N,)
-        cham_norm_y = cham_norm_y.sum(1)  # (N,)
+    # if return_normals:
+    #     cham_norm_x = cham_norm_x.sum(1)  # (N,)
+    #     cham_norm_y = cham_norm_y.sum(1)  # (N,)
     if point_reduction == "mean":
         cham_x /= x_lengths
         cham_y /= y_lengths
-        if return_normals:
-            cham_norm_x /= x_lengths
-            cham_norm_y /= y_lengths
+        # if return_normals:
+        #     cham_norm_x /= x_lengths
+        #     cham_norm_y /= y_lengths
 
     if batch_reduction is not None:
         # batch_reduction == "sum"
