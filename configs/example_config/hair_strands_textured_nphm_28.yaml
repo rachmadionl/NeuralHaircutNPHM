@@ -7,7 +7,7 @@ sdf_chamfer: {
 textured_strands: {
       "path_to_mesh": "./implicit-hair-data/data/nphm/028/registration.ply",
       "decoder_checkpoint_path": "./pretrained_models/strand_prior/strand_ckpt.pth",
-      "num_strands": 1200,
+      "num_strands": 1900,
       "max_num_strands": 100000,
       "texture_size": 256,
       "geometry_descriptor_size": 64,
@@ -68,7 +68,7 @@ general: {
     "starting_rendering_iter": 1,
     "gamma": 0.5,
     "milestones": [40000, 60000, 80000],
-    "orientation_path": './implicit-hair-data/data/nphm/028/nphm_28_oriens_aligned_sampled.ply',
+    "orientation_path": './implicit-hair-data/data/nphm/028/28_orients_orig_crest.ply',
     "sdf_path": './implicit-hair-data/data/nphm/028/ckpt_040000.pth'
   }
   

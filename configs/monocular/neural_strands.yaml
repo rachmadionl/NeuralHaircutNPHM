@@ -22,7 +22,7 @@ dataset: {
 train: {
     "learning_rate": 0.0005,
     "learning_rate_alpha": 0.05,
-    "end_iter": 300000,
+    "end_iter": 150000,
     "n_images_sampling": 32,
     "bs_sampling": 32,
 
