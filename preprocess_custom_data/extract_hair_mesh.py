@@ -489,12 +489,15 @@ def main(args, number):
     triangles_to_remove = triangle_clusters != largest_cluster_idx
     mesh_o3d.remove_triangles_by_mask(triangles_to_remove)
     o3d.io.write_triangle_mesh(f"./{args.out_folder}/{number}_mesh_orig.obj", mesh_o3d)
+
+    mesh_sharpened = mesh_o3d.filter_sharpen(number_of_iterations=1, strength=0.08)
+    o3d.io.write_triangle_mesh(f"./{args.out_folder}/{number}_mesh_sharpened.obj", mesh_sharpened)
     torch.cuda.empty_cache()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--nphm_folder', type=str, default='/home/rachmadio/dev/data/NPHM/scan')
-    parser.add_argument('--out_folder', type=str, default='pipeline_orig_ear_segmented_mesh')
+    parser.add_argument('--out_folder', type=str, default='pipeline_ear_segmented_mesh_sharpened')
     parser.add_argument('--use_flame', type=bool, default=False)
     parser.add_argument('--number', type=int, default=None)
     args = parser.parse_args()
